@@ -30,7 +30,9 @@ Demo video: [`demo.mp4`](demo.mp4)
 
 ## Demo
 
-https://github.com/duythinhpham07/care-passport-vn/raw/main/demo.mp4
+[![Watch the 2-minute demo](docs/0-video.png)](demo.mp4)
+
+**▶ [Watch the 2-minute demo](demo.mp4)** (1:48, narrated): sign in with Tide → add records → the admin and the AI try to read them → share one entry with the AI → revoke.
 
 | Your record, sealed per entry | The admin gets the whole database… | …and the AI reads nothing | Share one entry, then revoke |
 |---|---|---|---|
