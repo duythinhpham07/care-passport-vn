@@ -7,7 +7,11 @@ export type Lang = 'vi' | 'en'
 export function useLang(): [Lang, (l: Lang) => void] {
   const [lang, setLang] = useState<Lang>('vi')
   useEffect(() => {
-    try { const s = localStorage.getItem('lang'); if (s === 'vi' || s === 'en') setLang(s) } catch {}
+    // A saved choice wins; otherwise follow the browser (Vietnamese browsers get VI, everyone else EN).
+    let s: string | null = null
+    try { s = localStorage.getItem('lang') } catch {}
+    if (s === 'vi' || s === 'en') setLang(s)
+    else setLang(navigator.language?.toLowerCase().startsWith('vi') ? 'vi' : 'en')
   }, [])
   useEffect(() => { document.documentElement.lang = lang }, [lang])
   const set = (l: Lang) => { setLang(l); try { localStorage.setItem('lang', l) } catch {} }
