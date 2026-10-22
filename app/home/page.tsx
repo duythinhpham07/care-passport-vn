@@ -258,43 +258,37 @@ export default function CarePassport() {
         </div>
       </header>
 
-      <section className="hero">
-        <div className="passport" aria-label={t.cardTitle}>
-          <div className="passport-top">
-            <span>{t.cardTitle}</span>
-            <span className="chip-key"><Icon name="lock" size={13} /> {t.sealed}</span>
-          </div>
-          <div className="passport-name">{name || '…'}</div>
-          <dl className="passport-grid">
-            <div><dt>{t.patientId}</dt><dd>{vuid ? vuid.slice(0, 12) : '…'}</dd></div>
-            <div><dt>{t.entries}</dt><dd>{recs.length}</dd></div>
-            <div><dt>{t.key}</dt><dd>{t.keyHolder}</dd></div>
-            <div><dt>{t.keyCopies}</dt><dd>{t.keyCopiesVal}</dd></div>
-          </dl>
-        </div>
-        <div className="hero-copy">
+      <section className="top">
+        <div className="top-copy">
           <h1>{t.heroTitle}</h1>
           <p>{t.heroText}</p>
-          <div className="hero-actions">
-            <button className="btn btn-primary" onClick={() => dialog.current?.showModal()}>{t.add}</button>
+        </div>
+        <div className="passport-bar" aria-label={t.cardTitle}>
+          <div className="pb-who">
+            <span className="pb-label">{t.cardTitle}</span>
+            <strong>{name || '…'}</strong>
+          </div>
+          <dl className="pb-stats">
+            <div><dt>{t.patientId}</dt><dd>{vuid ? vuid.slice(0, 8) : '…'}</dd></div>
+            <div><dt>{t.entries}</dt><dd>{recs.length}</dd></div>
+            <div><dt>{t.key}</dt><dd><Icon name="lock" size={14} /> {t.keyHolder}</dd></div>
+          </dl>
+          <div className="pb-actions">
             {recs.length === 0 && loaded && (
-              <button className="btn btn-line" disabled={!!busy} onClick={loadSamples}>{busy === 'samples' ? t.sealing(SAMPLES[lang].length) : t.loadSamples}</button>
+              <button className="btn btn-ghost" disabled={!!busy} onClick={loadSamples}>{busy === 'samples' ? t.sealing(SAMPLES[lang].length) : t.loadSamples}</button>
             )}
+            <button className="btn btn-white" onClick={() => dialog.current?.showModal()}>{t.add}</button>
           </div>
         </div>
+        <ol className="stepper">
+          {t.steps.map((label, i) => (
+            <li key={i} className={done[i] ? 'done' : i === current ? 'now' : ''}>
+              <span className="step-no">{done[i] ? <Icon name="check" size={14} /> : i + 1}</span>
+              {label}
+            </li>
+          ))}
+        </ol>
       </section>
-
-      <ol className="steps">
-        {t.steps.map(([title, text], i) => (
-          <li key={i} className={done[i] ? 'done' : i === current ? 'now' : ''}>
-            <span className="step-no">{done[i] ? <Icon name="check" size={16} /> : i + 1}</span>
-            <span>
-              <strong>{title}</strong>
-              <span className="step-text">{text}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
 
       {err && <p className="alert" role="alert">{err} <button className="link" onClick={() => setErr('')}>{t.dismiss}</button></p>}
 
