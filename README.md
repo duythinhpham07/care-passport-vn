@@ -24,7 +24,7 @@ Records are encrypted in the browser with TideCloak `doEncrypt`/`doDecrypt`, bou
 
 ### 5. Prototype & storytelling
 
-Watch three panels: ① the patient encrypts Vietnamese medical notes and sees them decrypted locally; ② "Dump hospital database" shows that an admin only gets ciphertext; ③ the AI assistant reading the DB on its own gets **0 readable records**, and gets a useful summary only after the patient ticks records to share.
+The patient adds structured entries (allergy, condition, medication, lab, visit), each sealed in the browser. Watch for three moments. **Open database as admin** returns only ciphertext stamped *Sealed*. **Let AI read the database** returns 0 readable records. **Share access** grants one doctor or the AI chosen entries for 15 minutes, with a live countdown and **Revoke now**. Every attempt lands in the patient's access log.
 
 Demo video: [`demo.mp4`](demo.mp4)
 
@@ -46,6 +46,6 @@ npm run init          # writes tidecloak.json
 npm run dev           # http://localhost:3000
 ```
 
-Key files: `app/home/page.tsx` (patient, admin and AI panels), `app/api/records` (ciphertext-only storage, Tide token verified), `app/api/hospital-db` (simulated admin dump), `app/api/ai` (mock AI triage, synthetic data only).
+Key files: `app/home/page.tsx` (record timeline, time-limited sharing, access log), `app/api/records` (ciphertext-only storage, Tide token verified), `app/api/hospital-db` (simulated admin export), `app/api/ai` (mock AI triage, synthetic data only), `app/api/access-log`.
 
 Team **oldbie** (PTIT, RMIT Hackathon 2026, Hanoi).

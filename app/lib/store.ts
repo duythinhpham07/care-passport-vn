@@ -10,19 +10,43 @@ export type StoredRecord = {
   ciphertext: string
 }
 
-const DB_FILE = path.join(process.cwd(), 'data', 'hospital-db.json')
+export type AccessEvent = {
+  id: string
+  at: string
+  actor: string        // who tried: "Hospital administrator", "AI triage assistant", ...
+  action: string       // what they tried, in plain words
+  outcome: 'sealed' | 'denied' | 'granted' | 'revoked' | 'saved'
+}
 
-export async function readAll(): Promise<StoredRecord[]> {
+const DIR = path.join(process.cwd(), 'data')
+const DB_FILE = path.join(DIR, 'hospital-db.json')
+const LOG_FILE = path.join(DIR, 'access-log.json')
+
+async function readJson<T>(file: string): Promise<T[]> {
   try {
-    return JSON.parse(await fs.readFile(DB_FILE, 'utf-8'))
+    return JSON.parse(await fs.readFile(file, 'utf-8'))
   } catch {
     return []
   }
 }
 
+async function writeJson(file: string, data: unknown) {
+  await fs.mkdir(DIR, { recursive: true })
+  await fs.writeFile(file, JSON.stringify(data, null, 2))
+}
+
+export const readAll = () => readJson<StoredRecord>(DB_FILE)
+
 export async function append(rec: StoredRecord) {
   const all = await readAll()
   all.push(rec)
-  await fs.mkdir(path.dirname(DB_FILE), { recursive: true })
-  await fs.writeFile(DB_FILE, JSON.stringify(all, null, 2))
+  await writeJson(DB_FILE, all)
+}
+
+export const readLog = () => readJson<AccessEvent>(LOG_FILE)
+
+export async function log(actor: string, action: string, outcome: AccessEvent['outcome']) {
+  const all = await readLog()
+  all.push({ id: crypto.randomUUID(), at: new Date().toISOString(), actor, action, outcome })
+  await writeJson(LOG_FILE, all.slice(-200))
 }
