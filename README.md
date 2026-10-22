@@ -12,7 +12,7 @@ As Vietnam digitises health records and adopts AI triage, we make the patient, n
 
 ### 2. Trust constraint insight
 
-Today, whoever runs the server can read everything: admins, insiders, vendors, and anyone who breaches them. Patients hide sensitive history (HIV, mental health, allergies) from doctors because they cannot control who else sees it. Once no single party holds the key, hospitals can store the data without being able to read it.
+Today, whoever runs the server can read everything, and so can anyone who breaches it. Patients hide sensitive history (HIV, mental health, allergies) from doctors because they cannot control who else sees it. Once no single party holds the key, hospitals can store the data without being able to read it.
 
 ### 3. Value & impact
 
@@ -20,7 +20,7 @@ Take a student with an anxiety diagnosis and a penicillin allergy. They can safe
 
 ### 4. Why TideCloak matters
 
-Records are encrypted in the browser with TideCloak `doEncrypt`/`doDecrypt`, bound to the patient's Tide identity. The key is never assembled on our server. The realm runs with TideCloak IGA governance, so role changes need approval rather than a lone admin's click. With an ordinary login and backend permissions, our server could decrypt everything. With TideCloak, it cannot.
+Records are encrypted in the browser with TideCloak `doEncrypt`/`doDecrypt`, bound to the patient's Tide identity. The key is never assembled on our server. With an ordinary login and backend permissions, our server could decrypt everything. With TideCloak, it cannot.
 
 ### 5. Prototype & storytelling
 
