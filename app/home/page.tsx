@@ -1,27 +1,31 @@
 'use client'
 
 import { useTideCloak } from '@tidecloak/nextjs'
-import { useState, useCallback, useEffect, type CSSProperties } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 // Records are encrypted under the patient's own Tide identity. The tag matches the
 // _tide_message.selfencrypt/.selfdecrypt roles provisioned in init/realm.json.
 const TAG = 'message'
 
 type Rec = { id: string; createdAt: string; ciphertext: string; plain?: string }
+type Sealed = { id: string; owner: string; createdAt: string; ciphertext: string }
 
-const SAMPLES = [
-  'Dị ứng penicillin — phát ban toàn thân (2019). Không dùng nhóm beta-lactam.',
-  'Tiểu đường type 2, đang dùng Metformin 500mg x 2 lần/ngày. HbA1c 7.2%.',
-  'Khám tâm lý: rối loạn lo âu nhẹ, tư vấn 4 buổi tại BV Bạch Mai.',
+const PRESETS = [
+  { label: 'Dị ứng', text: 'Dị ứng penicillin: phát ban toàn thân năm 2019. Không dùng nhóm beta-lactam.' },
+  { label: 'Tiểu đường', text: 'Tiểu đường type 2, đang dùng Metformin 500mg, 2 lần/ngày. HbA1c 7.2%.' },
+  { label: 'Tâm lý', text: 'Tư vấn tâm lý: rối loạn lo âu nhẹ, 4 buổi tại BV Bạch Mai.' },
 ]
+
+const fmt = (iso: string) =>
+  new Date(iso).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 export default function CarePassport() {
   const { logout, getValueFromIdToken, token, doEncrypt, doDecrypt } = useTideCloak()
   const [name, setName] = useState('')
   const [text, setText] = useState('')
   const [recs, setRecs] = useState<Rec[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [dbDump, setDbDump] = useState<any[] | null>(null)
+  const [shared, setShared] = useState<Set<string>>(new Set())
+  const [dump, setDump] = useState<Sealed[] | null>(null)
   const [ai, setAi] = useState<any>(null)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
@@ -30,11 +34,11 @@ export default function CarePassport() {
 
   const load = useCallback(async () => {
     const res = await fetch('/api/records', { headers: auth })
-    if (!res.ok) return
+    if (!res.ok) throw new Error(`Couldn't load your records (HTTP ${res.status}). Sign in again.`)
     const list: Rec[] = await res.json()
-    // Decrypt in the browser — only this patient's Tide key can do it.
+    // Decrypt in the browser: only this patient's Tide key can do it.
     const plains = list.length ? await doDecrypt(list.map(r => ({ encrypted: r.ciphertext, tags: [TAG] }))) : []
-    setRecs(list.map((r, i) => ({ ...r, plain: String(plains[i]) })))
+    setRecs(list.map((r, i) => ({ ...r, plain: String(plains[i]) })).reverse())
   }, [token, doDecrypt])
 
   useEffect(() => {
@@ -51,115 +55,142 @@ export default function CarePassport() {
 
   const save = () => run('save', async () => {
     const [ct] = await doEncrypt([{ data: text, tags: [TAG] }])
-    await fetch('/api/records', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ ciphertext: ct }) })
+    const res = await fetch('/api/records', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ ciphertext: ct }) })
+    if (!res.ok) throw new Error(`The hospital server refused the entry (HTTP ${res.status}).`)
     setText('')
     await load()
   })
 
-  const showDb = () => run('db', async () => {
-    setDbDump(await (await fetch('/api/hospital-db')).json())
+  const viewAsAdmin = () => run('admin', async () => {
+    setDump(await (await fetch('/api/hospital-db')).json())
   })
 
-  const aiServer = () => run('ai', async () => {
+  const aiOnItsOwn = () => run('ai', async () => {
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'server' }) })
     setAi(await res.json())
   })
 
-  const aiConsent = () => run('ai', async () => {
-    const texts = recs.filter(r => selected.has(r.id)).map(r => r.plain)
+  const aiWithConsent = () => run('ai', async () => {
+    const texts = recs.filter(r => shared.has(r.id)).map(r => r.plain)
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'consent', texts }) })
     setAi(await res.json())
   })
 
-  const toggle = (id: string) => setSelected(s => {
+  const toggle = (id: string) => setShared(s => {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n
   })
 
   return (
-    <div style={page}>
-      <header style={header}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.6rem' }}>🩺 Care Passport VN</h1>
-          <p style={{ margin: '.25rem 0 0', color: '#456' }}>Your health record. Your key. No admin, hospital or AI can open it without you.</p>
+    <>
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden />
+          <span>Care Passport VN<small>Sổ khám bệnh điện tử</small></span>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div>Patient: <b>{name}</b></div>
-          <button style={btnGhost} onClick={() => logout()}>Log out</button>
+        <div className="who">
+          <span>Signed in as <b>{name}</b></span>
+          <button className="btn btn-quiet" onClick={() => logout()}>Sign out</button>
         </div>
       </header>
 
-      {err && <p style={{ color: '#c00' }}>⚠️ {err}</p>}
+      {err && <p className="error" role="alert">{err}</p>}
 
-      <div style={grid}>
-        <section style={card}>
-          <h2 style={h2}>① Patient — my records</h2>
-          <textarea style={area} value={text} onChange={e => setText(e.target.value)} placeholder="Nhập ghi chú y tế (tiếng Việt)…" />
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
-            {SAMPLES.map((s, i) => <button key={i} style={chip} onClick={() => setText(s)}>Mẫu {i + 1}</button>)}
+      <main className="layout">
+        <section className="booklet" aria-labelledby="booklet-title">
+          <h1 id="booklet-title">Your health record</h1>
+          <p className="lede">
+            Each entry is sealed with your Tide key before it leaves this device. The hospital stores it, but only you can open it.
+          </p>
+          <div className="keyline"><span className="keydot" aria-hidden />Key holder: you. No copy exists on the hospital server.</div>
+
+          <div className="entry">
+            <label htmlFor="note" className="sr-only" style={{ position: 'absolute', left: -9999 }}>New entry</label>
+            <textarea id="note" value={text} onChange={e => setText(e.target.value)} placeholder="Ghi chú khám bệnh, kết quả xét nghiệm, đơn thuốc…" />
+            <div className="entry-row">
+              <div className="presets" aria-label="Example entries">
+                {PRESETS.map(p => <button key={p.label} className="preset" onClick={() => setText(p.text)}>{p.label}</button>)}
+              </div>
+              <button className="btn btn-primary" disabled={!text || !!busy} onClick={save}>
+                {busy === 'save' ? 'Sealing…' : 'Seal and save'}
+              </button>
+            </div>
           </div>
-          <button style={btn} disabled={!text || !!busy} onClick={save}>{busy === 'save' ? 'Encrypting…' : '🔒 Encrypt & save'}</button>
-          <ul style={{ paddingLeft: 0, listStyle: 'none' }}>
+
+          <ol className="pages">
+            {recs.length === 0 && <li className="empty">No entries yet. Add your first one above, or pick an example.</li>}
             {recs.map(r => (
-              <li key={r.id} style={item}>
-                <label style={{ display: 'flex', gap: 8 }}>
-                  <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
-                  <span>{r.plain}</span>
+              <li key={r.id} className={`page${shared.has(r.id) ? ' is-shared' : ''}`}>
+                <time dateTime={r.createdAt}>{fmt(r.createdAt)}</time>
+                <p>{r.plain}</p>
+                <label className="share">
+                  <input type="checkbox" checked={shared.has(r.id)} onChange={() => toggle(r.id)} />
+                  Share with assistant
                 </label>
-                <small style={{ color: '#789' }}>{new Date(r.createdAt).toLocaleString()} · decrypted in your browser</small>
               </li>
             ))}
-          </ul>
+          </ol>
         </section>
 
-        <section style={card}>
-          <h2 style={h2}>② Hospital admin — raw database</h2>
-          <p style={muted}>What an admin, insider or attacker with full DB access gets.</p>
-          <button style={btnDark} disabled={!!busy} onClick={showDb}>Dump hospital database</button>
-          {dbDump && (
-            <pre style={pre}>{JSON.stringify(dbDump.map(r => ({ owner: r.owner.slice(0, 10) + '…', ciphertext: r.ciphertext.slice(0, 80) + '…' })), null, 2)}</pre>
-          )}
-        </section>
+        <aside className="requests" aria-labelledby="who-title">
+          <h2 id="who-title">Who else can read it?</h2>
+          <p>Try it from their side.</p>
 
-        <section style={card}>
-          <h2 style={h2}>③ AI triage assistant</h2>
-          <p style={muted}>The AI cannot help itself to your data. It only reads what you hand it.</p>
-          <button style={btnDark} disabled={!!busy} onClick={aiServer}>🤖 AI reads the DB on its own</button>
-          <button style={{ ...btn, marginLeft: 8 }} disabled={!!busy || selected.size === 0} onClick={aiConsent}>
-            ✅ Share {selected.size} selected record(s)
-          </button>
-          {ai && (
-            <div style={{ ...pre, whiteSpace: 'normal' }}>
-              {ai.mode === 'server' ? (
-                <>
-                  <b>❌ Readable: {ai.readable} / {ai.attempted}</b>
-                  <p>{ai.note}</p>
-                  {ai.sample?.map((s: string, i: number) => <code key={i} style={{ display: 'block' }}>{s}</code>)}
-                </>
-              ) : (
-                <>
-                  <b>✅ Summary from {ai.readable} record(s) you consented to</b>
-                  <p>Flags: {ai.flags.join(', ') || 'none'}</p>
-                  {ai.summary.map((s: string, i: number) => <div key={i}>{s}</div>)}
-                </>
-              )}
+          <div className="party">
+            <div className="party-head">
+              <span className="avatar" aria-hidden>QT</span>
+              <div>
+                <h3>Hospital administrator</h3>
+                <p>Full access to the database and the server.</p>
+              </div>
             </div>
-          )}
-        </section>
-      </div>
-    </div>
+            <button className="btn btn-quiet" disabled={!!busy} onClick={viewAsAdmin}>
+              {busy === 'admin' ? 'Opening…' : 'Open the database as admin'}
+            </button>
+            {dump && (
+              <div className="vault">
+                {dump.length === 0 && <p className="empty">The database is empty.</p>}
+                {dump.slice(-4).reverse().map(r => (
+                  <div className="sealed" key={r.id}>
+                    <div className="owner">Patient {r.owner.slice(0, 8)}, {fmt(r.createdAt)}</div>
+                    <code>{r.ciphertext}</code>
+                    <span className="stamp">Sealed</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="party">
+            <div className="party-head">
+              <span className="avatar ai" aria-hidden>AI</span>
+              <div>
+                <h3>AI triage assistant</h3>
+                <p>Helps doctors spot allergies and risks before treatment.</p>
+              </div>
+            </div>
+            <div className="actions">
+              <button className="btn btn-quiet" disabled={!!busy} onClick={aiOnItsOwn}>Let it read the database</button>
+              <button className="btn btn-consent" disabled={!!busy || shared.size === 0} onClick={aiWithConsent}>
+                Share {shared.size || ''} selected {shared.size === 1 ? 'entry' : 'entries'}
+              </button>
+            </div>
+
+            {ai?.mode === 'server' && (
+              <div className="verdict denied" role="status">
+                <strong>Read {ai.readable} of {ai.attempted} records</strong>
+                The assistant has no key. Without your consent, every record is sealed text.
+              </div>
+            )}
+            {ai?.mode === 'consent' && (
+              <div className="verdict granted" role="status">
+                <strong>Read {ai.readable} {ai.readable === 1 ? 'record' : 'records'} you shared</strong>
+                {ai.flags.length > 0 && <div className="flags">{ai.flags.map((f: string) => <span className="flag" key={f}>{f}</span>)}</div>}
+                <ul>{ai.summary.map((s: string, i: number) => <li key={i}>{s.replace(/^• /, '')}</li>)}</ul>
+              </div>
+            )}
+          </div>
+        </aside>
+      </main>
+    </>
   )
 }
-
-const page: CSSProperties = { minHeight: '100vh', background: '#eef4f7', padding: '24px', fontFamily: 'system-ui, sans-serif', color: '#123' }
-const header: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }
-const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }
-const card: CSSProperties = { background: '#fff', borderRadius: 10, padding: 16, boxShadow: '0 2px 10px rgba(0,0,0,.08)' }
-const h2: CSSProperties = { fontSize: '1.1rem', marginTop: 0 }
-const muted: CSSProperties = { color: '#567', fontSize: '.9rem' }
-const area: CSSProperties = { width: '100%', minHeight: 70, boxSizing: 'border-box', padding: 8, borderRadius: 6, border: '1px solid #bcd', fontFamily: 'inherit' }
-const btn: CSSProperties = { padding: '8px 14px', borderRadius: 6, border: 'none', background: '#0a7d5a', color: '#fff', cursor: 'pointer' }
-const btnDark: CSSProperties = { ...btn, background: '#334' }
-const btnGhost: CSSProperties = { ...btn, background: 'transparent', color: '#0a7d5a', border: '1px solid #0a7d5a', marginTop: 4 }
-const chip: CSSProperties = { padding: '3px 10px', borderRadius: 12, border: '1px solid #9bc', background: '#f4fafc', cursor: 'pointer' }
-const item: CSSProperties = { borderTop: '1px solid #eee', padding: '8px 0' }
-const pre: CSSProperties = { background: '#0f1720', color: '#cfe', padding: 10, borderRadius: 6, fontSize: 12, overflowX: 'auto', marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }
