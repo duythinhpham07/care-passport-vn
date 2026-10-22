@@ -5,6 +5,6 @@ import { readAll, log } from '../../lib/store'
 // insider or a breached server dumping the whole database. All they get is ciphertext.
 export async function GET() {
   const all = await readAll()
-  await log('Hospital administrator', `Opened the database and exported ${all.length} records`, 'sealed')
+  await log('admin', 'exported', all.length)
   return NextResponse.json(all)
 }

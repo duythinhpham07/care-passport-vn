@@ -245,3 +245,10 @@ h1, h2, h3 { letter-spacing: -.015em; }
 .signin-copy p { color: var(--ink-2); max-width: 46ch; margin: 0 0 1.75rem; font-size: 1.05rem; }
 .signin-copy .btn { padding: .8rem 1.4rem; font-size: 1rem; }
 .signin-copy .fineprint { margin: 1.25rem 0 0; font-size: .85rem; }
+
+/* ---------- language switch ---------- */
+.lang { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--sheet); }
+.lang button { border: 0; background: transparent; padding: .38rem .6rem; font-size: .8rem; font-weight: 700; color: var(--ink-3); cursor: pointer; }
+.lang button.on { background: var(--ink); color: #fff; }
+.signin-lang { position: fixed; top: 1rem; right: clamp(1rem, 4vw, 2.75rem); z-index: 2; }
+@media (max-width: 640px) { .hide-sm { display: none; } }

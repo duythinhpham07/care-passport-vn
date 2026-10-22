@@ -10,13 +10,10 @@ export type StoredRecord = {
   ciphertext: string
 }
 
-export type AccessEvent = {
-  id: string
-  at: string
-  actor: string        // who tried: "Hospital administrator", "AI triage assistant", ...
-  action: string       // what they tried, in plain words
-  outcome: 'sealed' | 'denied' | 'granted' | 'revoked' | 'saved'
-}
+// Language-neutral log entries; the browser renders them in the patient's language.
+export type Actor = 'you' | 'admin' | 'ai' | 'doctor'
+export type EventKind = 'added' | 'exported' | 'ai_denied' | 'ai_read' | 'granted' | 'revoked'
+export type AccessEvent = { id: string; at: string; actor: Actor; event: EventKind; count: number; until?: string }
 
 const DIR = path.join(process.cwd(), 'data')
 const DB_FILE = path.join(DIR, 'hospital-db.json')
@@ -45,8 +42,8 @@ export async function append(rec: StoredRecord) {
 
 export const readLog = () => readJson<AccessEvent>(LOG_FILE)
 
-export async function log(actor: string, action: string, outcome: AccessEvent['outcome']) {
+export async function log(actor: Actor, event: EventKind, count = 0, until?: string) {
   const all = await readLog()
-  all.push({ id: crypto.randomUUID(), at: new Date().toISOString(), actor, action, outcome })
+  all.push({ id: crypto.randomUUID(), at: new Date().toISOString(), actor, event, count, until })
   await writeJson(LOG_FILE, all.slice(-200))
 }
