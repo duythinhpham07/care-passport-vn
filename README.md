@@ -24,7 +24,7 @@ Records are encrypted in the browser with TideCloak `doEncrypt`/`doDecrypt`, bou
 
 ### 5. Prototype & storytelling
 
-The patient adds structured entries (allergy, condition, medication, lab, visit), each sealed in the browser. Watch for three moments. **Open database as admin** returns only ciphertext stamped *Sealed*. **Let AI read the database** returns 0 readable records. **Share access** grants one doctor or the AI chosen entries for 15 minutes, with a live countdown and **Revoke now**. Every attempt lands in the patient's access log.
+A guided three-step page. The patient adds structured entries (allergy, condition, medication, lab, visit), each sealed in the browser. **I'm the hospital admin** returns only scrambled text stamped *Sealed*. **Let the AI read it** returns 0 readable entries. **Who can see it?** gives one doctor or the AI chosen entries for 15 minutes, with a live countdown and **Revoke now**. Every attempt shows up in the patient's history.
 
 Demo video: [`demo.mp4`](demo.mp4)
 

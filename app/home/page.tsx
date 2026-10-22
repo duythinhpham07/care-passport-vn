@@ -17,7 +17,7 @@ type Actor = 'you' | 'admin' | 'ai' | 'doctor'
 type EventKind = 'added' | 'exported' | 'ai_denied' | 'ai_read' | 'granted' | 'revoked'
 type LogEvent = { id: string; at: string; actor: Actor; event: EventKind; count: number; until?: string }
 type Recipient = 'doctor' | 'ai'
-type Grant = { to: Recipient; ids: string[]; until: number; flags?: string[] }
+type Grant = { to: Recipient; ids: string[]; until: number; span: number; flags?: string[] }
 
 const KIND_ORDER: Kind[] = ['allergy', 'condition', 'medication', 'lab', 'visit']
 const DURATIONS = [15 * 60e3, 60 * 60e3, 24 * 60 * 60e3]
@@ -35,6 +35,33 @@ function parse(plain: string): Entry {
   return { kind: 'visit', title: plain.slice(0, 60), date: new Date().toISOString().slice(0, 10), facility: '', detail: plain }
 }
 
+// Sample entries are stored in whichever language was active when they were loaded;
+// show them in the current one so the page never mixes languages.
+function localize(e: Entry, lang: 'vi' | 'en'): Entry {
+  for (const l of ['vi', 'en'] as const) {
+    const i = SAMPLES[l].findIndex(s => s.title === e.title && s.date === e.date)
+    if (i >= 0) return { ...SAMPLES[lang][i] } as Entry
+  }
+  return e
+}
+
+const ICON_PATHS: Record<Kind | 'lock' | 'ai' | 'check' | 'eye', string> = {
+  allergy: 'M12 3l9 16H3zM12 10v4M12 16.5v.5',
+  condition: 'M3 12h4l2-5 4 10 2-5h6',
+  medication: 'M4.9 12.1l7.2-7.2a4.5 4.5 0 016.4 6.4l-7.2 7.2a4.5 4.5 0 01-6.4-6.4zM8.5 8.5l7 7',
+  lab: 'M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3M7.5 15h9',
+  visit: 'M7 4h10a2 2 0 012 2v13a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2zM9 3h6v3H9zM9 11h6M9 15h4',
+  lock: 'M6 11h12a1 1 0 011 1v8a1 1 0 01-1 1H6a1 1 0 01-1-1v-8a1 1 0 011-1zM8 11V7a4 4 0 018 0v4M12 15v2',
+  ai: 'M8 7h8a1 1 0 011 1v8a1 1 0 01-1 1H8a1 1 0 01-1-1V8a1 1 0 011-1zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  eye: 'M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12zM12 9.5a2.5 2.5 0 110 5 2.5 2.5 0 010-5z',
+}
+const Icon = ({ name, size = 18 }: { name: keyof typeof ICON_PATHS; size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d={ICON_PATHS[name]} />
+  </svg>
+)
+
 export default function CarePassport() {
   const { logout, getValueFromIdToken, token, doEncrypt, doDecrypt, authenticated, isInitializing } = useTideCloak()
   const [lang, setLang] = useLang()
@@ -51,6 +78,7 @@ export default function CarePassport() {
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
   const [toast, setToast] = useState('')
+  const [fresh, setFresh] = useState<Set<string>>(new Set())
 
   const [draft, setDraft] = useState<Entry>(blank)
   const dialog = useRef<HTMLDialogElement>(null)
@@ -81,17 +109,20 @@ export default function CarePassport() {
     const res = await fetch('/api/records', { headers: auth })
     if (!res.ok) throw new Error(await fail(res))
     const list: Rec[] = await res.json()
-    // Decrypt in the browser, one by one so a single bad entry can't hide the rest.
-    const out = await Promise.all(list.map(async r => {
+    // Decrypt in the browser, one at a time: concurrent doDecrypt calls mix up their results,
+    // and separate calls keep a single bad entry from hiding the rest.
+    const out: Rec[] = []
+    for (const r of list) {
       try {
         const [plain] = await doDecrypt([{ encrypted: r.ciphertext, tags: [TAG] }])
-        return { ...r, entry: parse(String(plain)) }
+        out.push({ ...r, entry: parse(String(plain)) })
       } catch {
-        return { ...r, broken: true }
+        out.push({ ...r, broken: true })
       }
-    }))
+    }
     setRecs(out)
     setLoaded(true)
+    return out
   }, [auth, doDecrypt, lang])
 
   useEffect(() => {
@@ -125,7 +156,10 @@ export default function CarePassport() {
       const res = await fetch('/api/records', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ ciphertext: ct }) })
       if (!res.ok) throw new Error(await fail(res))
     }
-    await Promise.all([load(), refreshLog()])
+    const before = new Set(recs.map(r => r.id))
+    const [out] = await Promise.all([load(), refreshLog()])
+    setFresh(new Set(out.filter(r => !before.has(r.id)).map(r => r.id)))
+    setTimeout(() => setFresh(new Set()), 2400)
   }
 
   const saveDraft = () => run('save', async () => {
@@ -153,7 +187,7 @@ export default function CarePassport() {
   })
 
   const shareSelected = () => run('share', async () => {
-    const chosen = recs.filter(r => selected.has(r.id) && r.entry)
+    const chosen = view.filter(r => selected.has(r.id) && r.entry)
     const until = Date.now() + duration
     let flags: string[] | undefined
     if (to === 'ai') {
@@ -163,10 +197,11 @@ export default function CarePassport() {
     } else {
       await fetch('/api/access-log', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ actor: 'doctor', event: 'granted', count: chosen.length, until: new Date(until).toISOString() }) })
     }
-    setGrant({ to, ids: chosen.map(r => r.id), until, flags })
+    setGrant({ to, ids: chosen.map(r => r.id), until, span: duration, flags })
     setNow(Date.now())
     await refreshLog()
-    say(t.toastShared(chosen.length, t.recipients[to].name.toLowerCase()))
+    const who = t.recipients[to].name
+    say(t.toastShared(chosen.length, to === 'ai' ? who : who.toLowerCase()))
   })
 
   const revoke = () => run('revoke', async () => {
@@ -182,8 +217,9 @@ export default function CarePassport() {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n
   })
 
+  const view = useMemo(() => recs.map(r => r.entry ? { ...r, entry: localize(r.entry, lang) } : r), [recs, lang])
   const byYear = useMemo(() => {
-    const sorted = recs.filter(r => r.entry).sort((a, b) => b.entry!.date.localeCompare(a.entry!.date))
+    const sorted = view.filter(r => r.entry).sort((a, b) => b.entry!.date.localeCompare(a.entry!.date))
     const groups: [string, Rec[]][] = []
     for (const r of sorted) {
       const y = r.entry!.date.slice(0, 4)
@@ -191,10 +227,17 @@ export default function CarePassport() {
       groups[groups.length - 1][1].push(r)
     }
     return groups
-  }, [recs])
+  }, [view])
   const broken = recs.filter(r => r.broken).length
-  const grantedEntries = grant ? recs.filter(r => grant.ids.includes(r.id) && r.entry) : []
+  const grantedEntries = grant ? view.filter(r => grant.ids.includes(r.id) && r.entry) : []
   const left = grant ? Math.max(0, grant.until - now) : 0
+  const leftPct = grant ? Math.min(100, (left / grant.span) * 100) : 0
+  const done = [
+    recs.length > 0,
+    !!probe || log.some(l => l.event === 'exported' || l.event === 'ai_denied'),
+    !!grant || log.some(l => l.event === 'granted' || l.event === 'ai_read'),
+  ]
+  const current = done.indexOf(false)
   const leftLabel = left > 3600e3 ? `${Math.ceil(left / 3600e3)} h` : `${Math.floor(left / 60e3)}:${String(Math.floor(left / 1e3) % 60).padStart(2, '0')}`
   const describe = (l: LogEvent) => {
     const f = t.events[l.event] as (n: number, u?: string) => string
@@ -219,14 +262,14 @@ export default function CarePassport() {
         <div className="passport" aria-label={t.cardTitle}>
           <div className="passport-top">
             <span>{t.cardTitle}</span>
-            <span className="chip-key">{t.sealed}</span>
+            <span className="chip-key"><Icon name="lock" size={13} /> {t.sealed}</span>
           </div>
           <div className="passport-name">{name || '…'}</div>
           <dl className="passport-grid">
             <div><dt>{t.patientId}</dt><dd>{vuid ? vuid.slice(0, 12) : '…'}</dd></div>
             <div><dt>{t.entries}</dt><dd>{recs.length}</dd></div>
             <div><dt>{t.key}</dt><dd>{t.keyHolder}</dd></div>
-            <div><dt>{t.keyCopies}</dt><dd>0</dd></div>
+            <div><dt>{t.keyCopies}</dt><dd>{t.keyCopiesVal}</dd></div>
           </dl>
         </div>
         <div className="hero-copy">
@@ -241,18 +284,38 @@ export default function CarePassport() {
         </div>
       </section>
 
+      <ol className="steps">
+        {t.steps.map(([title, text], i) => (
+          <li key={i} className={done[i] ? 'done' : i === current ? 'now' : ''}>
+            <span className="step-no">{done[i] ? <Icon name="check" size={16} /> : i + 1}</span>
+            <span>
+              <strong>{title}</strong>
+              <span className="step-text">{text}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+
       {err && <p className="alert" role="alert">{err} <button className="link" onClick={() => setErr('')}>{t.dismiss}</button></p>}
 
       <main className="grid">
         <section className="timeline-wrap" aria-labelledby="tl">
           <div className="section-head">
-            <h2 id="tl">{t.record}</h2>
-            <span className="muted">{selected.size > 0 ? t.selected(selected.size) : t.tickToShare}</span>
+            <h2 id="tl"><span className="num">1</span>{t.record}</h2>
+            <span className="muted">{selected.size > 0 ? t.selected(selected.size) : recs.length > 0 ? t.tickToShare : ''}</span>
           </div>
 
           {!loaded && <p className="muted pad">{t.unsealing}</p>}
           {loaded && recs.length === 0 && (
             <div className="empty">
+              <svg width="96" height="96" viewBox="0 0 96 96" aria-hidden>
+                <rect x="20" y="10" width="54" height="74" rx="5" fill="var(--cover)" />
+                <rect x="20" y="10" width="8" height="74" rx="3" fill="var(--cover-deep)" />
+                <circle cx="51" cy="40" r="12" fill="none" stroke="#c9d8ef" strokeWidth="2" />
+                <path d="M51 34v12M45 40h12" stroke="#c9d8ef" strokeWidth="2.5" strokeLinecap="round" />
+                <rect x="58" y="58" width="26" height="22" rx="4" fill="var(--seal)" />
+                <path d="M64 58v-5a7 7 0 0114 0v5" fill="none" stroke="var(--seal)" strokeWidth="3" />
+              </svg>
               <p><strong>{t.emptyTitle}</strong></p>
               <p className="muted">{t.emptyText}</p>
             </div>
@@ -263,18 +326,22 @@ export default function CarePassport() {
             <div className="year" key={year}>
               <div className="year-label">{year}</div>
               <ol className="entries">
-                {items.map(r => {
+                {items.map((r, i) => {
                   const e = r.entry!
                   const on = selected.has(r.id)
+                  const shared = grant?.ids.includes(r.id)
                   return (
-                    <li key={r.id} className={`entry k-${e.kind}${on ? ' on' : ''}`}>
+                    <li key={r.id} className={`entry k-${e.kind}${on ? ' on' : ''}${fresh.has(r.id) ? ' fresh' : ''}`} style={{ animationDelay: `${i * 40}ms` }}>
                       <label className="entry-hit">
                         <input type="checkbox" checked={on} onChange={() => toggle(r.id)} />
+                        <span className="kind-icon"><Icon name={e.kind} /></span>
                         <span className="entry-body">
-                          <span className="entry-meta"><span className="kind">{t.kinds[e.kind]}</span>{dmy(e.date)}{e.facility && `, ${e.facility}`}</span>
+                          <span className="entry-meta"><span className="kind">{t.kinds[e.kind]}</span>{dmy(e.date)}{e.facility && ` · ${e.facility}`}</span>
                           <span className="entry-title">{e.title}</span>
                           {e.detail && <span className="entry-detail">{e.detail}</span>}
                         </span>
+                        {shared && <span className="shared-mark" title={t.recipients[grant!.to].name}><Icon name="eye" size={16} /></span>}
+                        {fresh.has(r.id) && <span className="fresh-stamp">{t.sealed}</span>}
                       </label>
                     </li>
                   )
@@ -285,14 +352,45 @@ export default function CarePassport() {
         </section>
 
         <aside className="side">
-          <section className="panel" aria-labelledby="share">
-            <h2 id="share">{t.shareTitle}</h2>
+          <section className={`panel${current === 1 ? ' panel-now' : ''}`} aria-labelledby="probe">
+            <h2 id="probe"><span className="num">2</span>{t.probeTitle}</h2>
+            <p className="muted small hint">{t.probeHint}</p>
+            <div className="probe-actions">
+              <button className="btn btn-line" disabled={!!busy || recs.length === 0} onClick={openAsAdmin}>{busy === 'admin' ? t.opening : t.openAdmin}</button>
+              <button className="btn btn-line" disabled={!!busy || recs.length === 0} onClick={aiWithoutConsent}><Icon name="ai" size={16} />{busy === 'ai' ? t.reading : t.letAi}</button>
+            </div>
+            {probe?.kind === 'admin' && (
+              <div className="vault">
+                <p className="small muted">{t.exported(probe.rows.length)}</p>
+                {probe.rows.slice(-3).reverse().map(r => (
+                  <div className="sealed" key={r.id}>
+                    <code>{r.ciphertext}</code>
+                    <span className="stamp">{t.stamp}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {probe?.kind === 'ai' && (
+              <div className="verdict" key={log.length}>
+                <span className="verdict-lock"><Icon name="lock" size={22} /></span>
+                <span>
+                  <strong>{t.aiZero(probe.attempted)}</strong>
+                  <span>{t.aiWhy}</span>
+                </span>
+              </div>
+            )}
+          </section>
+
+          <section className={`panel${current === 2 ? ' panel-now' : ''}`} aria-labelledby="share">
+            <h2 id="share"><span className="num">3</span>{t.shareTitle}</h2>
             {!grant ? (
               <>
+                <p className="muted small hint">{t.shareHint}</p>
                 <div className="seg" role="radiogroup">
                   {(['doctor', 'ai'] as Recipient[]).map(k => (
                     <button key={k} role="radio" aria-checked={to === k} className={to === k ? 'on' : ''} onClick={() => setTo(k)}>
-                      <strong>{t.recipients[k].name}</strong><span>{t.recipients[k].who}</span>
+                      <span className={`avatar av-${k}`}>{k === 'doctor' ? 'MA' : <Icon name="ai" size={18} />}</span>
+                      <span className="seg-text"><strong>{t.recipients[k].name}</strong><span>{t.recipients[k].who}</span></span>
                     </button>
                   ))}
                 </div>
@@ -309,12 +407,14 @@ export default function CarePassport() {
             ) : (
               <div className="grant">
                 <div className="grant-head">
-                  <div>
+                  <span className={`avatar av-${grant.to}`}>{grant.to === 'doctor' ? 'MA' : <Icon name="ai" size={18} />}</span>
+                  <div className="seg-text">
                     <strong>{t.recipients[grant.to].name}</strong>
                     <span className="muted">{t.recipients[grant.to].who}</span>
                   </div>
-                  <span className="timer">{leftLabel}</span>
+                  <span className="timer">{leftLabel}<small>{t.timeLeft}</small></span>
                 </div>
+                <div className="meter" aria-hidden><span style={{ width: `${leftPct}%` }} /></div>
                 {grant.flags && (
                   <div className="flags">
                     {grant.flags.length ? grant.flags.map(f => <span key={f} className="flag">{t.flags[f as keyof typeof t.flags] ?? f}</span>) : <span className="muted">{t.noRisk}</span>}
@@ -325,32 +425,7 @@ export default function CarePassport() {
                   {grantedEntries.map(r => <li key={r.id} className={`k-${r.entry!.kind}`}><span className="dot" />{r.entry!.title}</li>)}
                 </ul>
                 <p className="muted small">{t.restSealed(hm(grant.until))}</p>
-                <button className="btn btn-line wide" disabled={!!busy} onClick={revoke}>{t.revoke}</button>
-              </div>
-            )}
-          </section>
-
-          <section className="panel" aria-labelledby="probe">
-            <h2 id="probe">{t.probeTitle}</h2>
-            <div className="probe-actions">
-              <button className="btn btn-line" disabled={!!busy} onClick={openAsAdmin}>{busy === 'admin' ? t.opening : t.openAdmin}</button>
-              <button className="btn btn-line" disabled={!!busy} onClick={aiWithoutConsent}>{busy === 'ai' ? t.reading : t.letAi}</button>
-            </div>
-            {probe?.kind === 'admin' && (
-              <div className="vault">
-                <p className="small muted">{t.exported(probe.rows.length)}</p>
-                {probe.rows.slice(-3).reverse().map(r => (
-                  <div className="sealed" key={r.id}>
-                    <code>{r.ciphertext}</code>
-                    <span className="stamp">{t.stamp}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {probe?.kind === 'ai' && (
-              <div className="verdict">
-                <strong>{t.aiZero(probe.attempted)}</strong>
-                <span>{t.aiWhy}</span>
+                <button className="btn btn-revoke wide" disabled={!!busy} onClick={revoke}>{t.revoke}</button>
               </div>
             )}
           </section>
@@ -380,7 +455,7 @@ export default function CarePassport() {
           </div>
           <div className="kinds" role="radiogroup">
             {KIND_ORDER.map(k => (
-              <button type="button" key={k} role="radio" aria-checked={draft.kind === k} className={`k-${k}${draft.kind === k ? ' on' : ''}`} onClick={() => setDraft(d => ({ ...d, kind: k }))}>{t.kinds[k]}</button>
+              <button type="button" key={k} role="radio" aria-checked={draft.kind === k} className={`k-${k}${draft.kind === k ? ' on' : ''}`} onClick={() => setDraft(d => ({ ...d, kind: k }))}><Icon name={k} size={15} />{t.kinds[k]}</button>
             ))}
           </div>
           <label className="field"><span>{t.title}</span><input required value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} placeholder={t.titlePh} /></label>
