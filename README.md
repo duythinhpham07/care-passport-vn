@@ -47,11 +47,11 @@ sequenceDiagram
     participant S as Our server + DB
     actor A as Hospital admin / AI
     P->>T: Sign in with TideCloak (key shards stay on Tide nodes)
-    P->>T: doEncrypt(entry, tag "message")
+    P->>T: doEncrypt(entry) with tag message
     T-->>P: ciphertext
     P->>S: POST ciphertext (token verified, no plaintext)
     A->>S: export the whole database
-    S-->>A: ciphertext only: "Sealed", 0 readable
+    S-->>A: ciphertext only, 0 readable entries
     P->>T: doDecrypt(chosen entries)
     T-->>P: plaintext, in the patient's browser
     P->>A: share chosen entries for 15 min, revoke any time
